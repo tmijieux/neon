@@ -1,2 +1,3 @@
 time_gemm
+test_gemm
 kernel_perf.csv

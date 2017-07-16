@@ -1,13 +1,18 @@
 CC=gcc
 CFLAGS=-Wall -Wextra -Werror -std=c11 -O3 -fPIE -march=native -mtune=native -pipe
-LIBS= -L.. -lcblas -L${MKLROOT}/lib/intel64 -lmkl_core -lmkl_gnu_thread -lmkl_intel_lp64
+LIBS=-lm -L.. -lcblas -L${MKLROOT}/lib/intel64 -lmkl_core -lmkl_sequential -lmkl_intel_lp64
 LDFLAGS=-O3 -Wl,-rpath,'$$ORIGIN/..:${MKLROOT}/lib/intel64'
-SRC= 	time_gemm.c \
-	util.c \
-	timer.c \
+TIME_SRC= 	time_gemm.c \
+		util.c \
+		timer.c \
 
-OBJ2=$(SRC:.c=.o)
-OBJ=$(OBJ2:.s=.o)
+TEST_SRC= 	test_gemm.c \
+		util.c \
+		timer.c \
+
+TIME_OBJ=$(TIME_SRC:.c=.o)
+TEST_OBJ=$(TEST_SRC:.c=.o)
+
 DEPS=$(wildcard *.dep)
 
 ifdef DEBUG
@@ -15,7 +20,7 @@ CFLAGS+=-O0 -ggdb -DNEON_DEBUG_MODE=1
 LDFLAGS+=-O0 -ggdb
 endif
 
-all: time_gemm
+all: time_gemm test_gemm
 
 -include $(DEPS)
 
@@ -26,7 +31,10 @@ all: time_gemm
 	@$(CC) -MM $(CFLAGS) -c -o $*.dep $<
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-time_gemm: $(OBJ)
+time_gemm: $(TIME_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LIBS)
+
+test_gemm: $(TEST_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LIBS)
 
 clean:

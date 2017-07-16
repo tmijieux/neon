@@ -22,4 +22,12 @@ void neon_fatal_error(const char *file, const char *function, int line, const ch
         neon_fatal_error(__FILE__,__func__, __LINE__, (msgfmt), ##__VA_ARGS__ ); \
     }while(0)
 
+void randomizer_initialize();
+void srandomize_matrix(int M, int N, int LD, float *A);
+void drandomize_matrix(int M, int N, int LD, double *A);
+void crandomize_matrix(int M, int N, int LD, float _Complex *A);
+void zrandomize_matrix(int M, int N, int LD, double _Complex *A);
+
+void display_dmatrix(int M, int N, int LD, double *A);
+
 #endif // NEON_UTIL_H

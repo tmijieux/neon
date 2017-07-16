@@ -2,98 +2,113 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <complex.h>
+#include <math.h>
 
 #include "../cblas.h"
 #include "util.h"
 #include "timer.h"
 
-extern void neon_cblas_dgemm(CBLAS_LAYOUT layout, CBLAS_TRANSPOSE TransA,
-                             CBLAS_TRANSPOSE TransB, const int M, const int N,
-                             const int K, const double alpha, const double *A,
-                             const int lda, const double *B, const int ldb,
-                             const double beta, double *C, const int ldc);
+extern void neon_cblas_dgemm_transA(CBLAS_LAYOUT layout, CBLAS_TRANSPOSE TransA,
+                                    CBLAS_TRANSPOSE TransB, const int M, const int N,
+                                    const int K, const double alpha, const double *A,
+                                    const int lda, const double *B, const int ldb,
+                                    const double beta, double *C, const int ldc);
 
-extern void neon_cblas_dgemm_transA_avx2(CBLAS_LAYOUT layout, CBLAS_TRANSPOSE TransA,
-                                         CBLAS_TRANSPOSE TransB, const int M, const int N,
-                                         const int K, const double alpha, const double *A,
-                                         const int lda, const double *B, const int ldb,
-                                         const double beta, double *C, const int ldc);
+extern void neon_cblas_dgemm_transA_avx2_multirow( CBLAS_LAYOUT layout, CBLAS_TRANSPOSE TransA,
+                                                   CBLAS_TRANSPOSE TransB, const int M, const int N,
+                                                   const int K, const double alpha, const double *A,
+                                                   const int lda, const double *B, const int ldb,
+                                                   const double beta, double *C, const int ldc);
+
+extern void neon_cblas_dgemm_transA_avx2_unirow( CBLAS_LAYOUT layout, CBLAS_TRANSPOSE TransA,
+                                                 CBLAS_TRANSPOSE TransB, const int M, const int N,
+                                                 const int K, const double alpha, const double *A,
+                                                 const int lda, const double *B, const int ldb,
+                                                 const double beta, double *C, const int ldc);
+
+void neon_cblas_dgemm_transA_tiled( CBLAS_LAYOUT layout, CBLAS_TRANSPOSE TransA,
+                                    CBLAS_TRANSPOSE TransB, const int M, const int N,
+                                    const int K, const double alpha, const double *A,
+                                    const int lda, const double *B, const int ldb,
+                                    const double beta, double *C, const int ldc    );
 
 #define GEMM_ADD(M_, N_, K_) ((double)(M_) * (double)(N_) * (double)(K_))
 #define GEMM_MUL(M_, N_, K_) ((double)(M_) * (double)(N_) * (double)(K_))
 
-void test_neon_dgemm(const int N)
+void test_neon_dgemm(const int M, const int N, const int K)
 {
-    double *A = dalloc_matrix(N, N, N);
-    double *B = dalloc_matrix(N, N, N);
-    double *C = dalloc_matrix(N, N, N);
-    double alpha = 1.0;
-    double beta = 0.0;
-    // fprintf(stderr, "Allocation done.\n");
+    double *A = dalloc_matrix(K, M, K);
+    double *B = dalloc_matrix(K, N, K);
+    double *C1 = dalloc_matrix(M, N, M);
+    double *C2 = dalloc_matrix(M, N, M);
+
+    drandomize_matrix(M, K, M, A);
+    drandomize_matrix(K, N, K, B);
+
+    const double alpha = 1.0;
+    const double beta = 0.0;
 
     struct timer timer;
     timer_init(&timer);
 
     timer_start(&timer);
-    neon_cblas_dgemm_transA_avx2(CblasColMajor, CblasTrans, CblasNoTrans,
-                                 N, N, N,
-                                 alpha, A, N,
-                                 /**/   B, N,
-                                 beta,  C, N    );
+    neon_cblas_dgemm_transA_tiled( CblasColMajor, CblasTrans, CblasNoTrans,
+                                   M, N, K,
+                                   alpha, A, K,
+                                   /**/   B, K,
+                                   beta,  C1, M    );
+    /* cblas_dgemm( CblasColMajor, CblasTrans, CblasNoTrans, */
+    /*              M, N, K, */
+    /*              alpha, A, K, */
+    /*              /\**\/   B, K, */
+    /*              beta,  C1, M    ); */
+    neon_cblas_dgemm_transA(CblasColMajor, CblasTrans, CblasNoTrans,
+                            M, N, K,
+                            alpha, A, K,
+                            /**/   B, K,
+                            beta,  C2, M   );
+
+    /* display_dmatrix(N, N, N, C1); */
+    /* display_dmatrix(N, N, N, C2); */
+
+    double norm = 0.0;
+    for (int j = 0; j < N; ++j) {
+        for (int i = 0; i < M; ++i) {
+            C1[j*M+i] = (C1[j*M+i] - C2[j*M+i]) / C1[j*M+i];
+            norm += C1[j*M+i] * C1[j*M+i];
+        }
+    }
+    //display_dmatrix(N, N, N, C1);
+    norm = sqrt(norm);
     timer_stop(&timer);
 
-    // fprintf(stderr, "dgemm done.\n");
-    free(A); free(B); free(C);
+    free(A);
+    free(B);
+    free(C1);
+    free(C2);
 
     double length = timer_get_length(&timer);
-    double gemm_flops = GEMM_ADD(N, N, N) + GEMM_MUL(N, N, N);
-    double gflops_s = gemm_flops / (length*1000000000.0);
-    printf("%d,%g,%g,%g,neon_dgemm\n", N, length, gemm_flops, gflops_s);
-}
-
-void test_mkl_dgemm(const int N)
-{
-    double *A = dalloc_matrix(N, N, N);
-    double *B = dalloc_matrix(N, N, N);
-    double *C = dalloc_matrix(N, N, N);
-    double alpha = 1.0;
-    double beta = 0.0;
-    // fprintf(stderr, "Allocation done.\n");
-
-    struct timer timer;
-    timer_init(&timer);
-
-    timer_start(&timer);
-    cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans,
-                N, N, N,
-                alpha, A, N,
-                /**/   B, N,
-                beta,  C, N    );
-    timer_stop(&timer);
-
-    // fprintf(stderr, "dgemm done.\n");
-    free(A); free(B); free(C);
-
-    double length = timer_get_length(&timer);
-    double gemm_flops = GEMM_ADD(N, N, N) + GEMM_MUL(N, N, N);
-    double gflops_s = gemm_flops / (length*1000000000.0);
-    printf("%d,%g,%g,%g,mkl_dgemm\n", N, length, gemm_flops, gflops_s);
+    printf("%d,%d,%d,%g,%g,neon_dgemm\n", M, N, K, length, norm);
 }
 
 int main(int argc, char *argv[])
 {
+    randomizer_initialize();
+
     fprintf(stderr, "argc=%d, argv=[ ", argc);
     for (int i = 0; argv[i] != NULL; ++i) {
         fprintf(stderr, "\"%s\", ", argv[i]);
     }
     fprintf(stderr, "NULL ]\n");
 
-    for (int i = 100; i < 2000; i += 100) {
-        test_mkl_dgemm(i);
-    }
-    for (int i = 100; i < 2000; i += 100) {
-        test_neon_dgemm(i);
-    }
+    printf("M,N,K,test_time,diff_norm,kernel\n");
 
+    for (int m = 10; m < 500; m += 13) {
+        for (int n = 10; n < 500; n += 13) {
+            for (int k = 10; k < 500; k += 13) {
+                test_neon_dgemm(m, n, k);
+            }
+        }
+    }
     return 0;
 }
