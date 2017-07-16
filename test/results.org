@@ -1,0 +1,56 @@
+# -*- mode: org -*-
+# -*- coding: utf-8 -*-
+
+#+TITLE: neon work station
+#+AUTHOR: Thomas Mijieux
+#+EMAIL: thomas.mijieux@hotmail.fr
+#+PROPERTY: header-args:sh :exports none :eval never-export
+#+PROPERTY: header-args:shell :exports none :eval never-export
+#+PROPERTY: header-args:shell+ :var WORKDIR=neon_test_root :session *neon_test* :results silent
+#+PROPERTY: header-args:R :exports results :eval never-export
+#+PROPERTY: header-args:R+ :results output graphics :file (org-babel-temp-file "figure" ".png")
+#+PROPERTY: header-args:R+ :width 600 :height 400 :session
+#+EXPORT_SELECT_TAGS: export
+#+EXPORT_EXCLUDE_TAGS: noexport
+
+#+NAME: neon_test_root
+#+BEGIN_SRC sh
+echo ${HOME}/neon/test
+#+END_SRC
+
+* compilation
+** load mkl into environment
+   #+begin_src shell
+   source /opt/intel/bin/compilervars.sh intel64
+   #+end_src
+
+** basic compilation
+   #+begin_src shell
+   make -C .. ; make
+   #+end_src
+** clean repository
+   #+begin_src shell
+   make -C .. fullclean ; make fullclean
+   #+end_src
+** debug build
+   #+begin_src shell
+   export DEBUG=1
+   make -C .. fullclean ; make fullclean
+   make -C ..; make
+   unset DEBUG
+   #+end_src
+
+* results
+** run experience
+   #+begin_src shell
+   ./time_gemm > kernel_perf.csv
+   #+end_src
+
+** plot
+   #+begin_src R
+library(ggplot2)
+df <- read.csv("kernel_perf.csv")
+ggplot(df, aes(x=N, y=gflops_s, color=kernel)) +
+    geom_point() + geom_smooth() +
+    ggtitle("GEMM Kernel performance")
+   #+end_src
