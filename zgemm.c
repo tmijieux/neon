@@ -4,12 +4,13 @@
 
 #include "cblas.h"
 
-void neon_cblas_zgemm(CBLAS_LAYOUT layout,
-                      CBLAS_TRANSPOSE TransA, CBLAS_TRANSPOSE TransB,
-                      const int M, const int N, const int K,
-                      const void *p_alpha, const void *p_A, const int lda,
-                      /**/                 const void *p_B, const int ldb,
-                      const void *p_beta,        void *p_C, const int ldc)
+void neon_cblas_zgemm_reference(
+    const CBLAS_LAYOUT layout,
+    const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
+    const int M, const int N, const int K,
+    const void *p_alpha, const void * restrict const p_A, const int lda,
+    /**/                 const void * restrict const p_B, const int ldb,
+    const void *p_beta,        void * restrict const p_C, const int ldc)
 {
     double _Complex alpha = *(double _Complex*) p_alpha;
     double _Complex beta = *(double _Complex*) p_beta;
@@ -24,7 +25,6 @@ void neon_cblas_zgemm(CBLAS_LAYOUT layout,
     double norm_alpha = cabs(alpha);
     assert( isnormal(norm_alpha) );
 
-    // #pragma omp parallel for collapse(2) schedule(static, 200)
     for (int j = 0; j < N; ++j) {
         for (int i = 0; i < M; ++i) {
             C[j*ldc+i] = (beta/alpha) * C[j*ldc+i];
@@ -35,4 +35,3 @@ void neon_cblas_zgemm(CBLAS_LAYOUT layout,
         }
     }
 }
-

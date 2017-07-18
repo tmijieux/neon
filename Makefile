@@ -6,8 +6,9 @@ CBLAS_VERSION=$(CBLAS_VERSION_MAJOR).$(CBLAS_VERSION_MINOR).$(CBLAS_VERSION_PATC
 CC=gcc
 LN=ln -f
 CFLAGS=-Wall -Wextra -pedantic -Werror -std=c11 -O3 -fPIC -march=native -mtune=native -pipe -fopenmp
-LIBS=-lm
-LDFLAGS=-shared -O3 -Wl,-soname,"libcblas.so.$(CBLAS_VERSION_MAJOR)" -Wl,-no-undefined -fopenmp
+LIBS=-lm -L.. -L${MKLROOT}/lib/intel64 -lmkl_core -lmkl_gnu_thread -lmkl_intel_lp64
+LDFLAGS=-shared -O3 -Wl,-soname,"libcblas.so.$(CBLAS_VERSION_MAJOR)" -Wl,-no-undefined \
+	-fopenmp  -Wl,-rpath,'$$ORIGIN/..:${MKLROOT}/lib/intel64'
 SRC= 	zgemm.c \
 	dgemm.c
 

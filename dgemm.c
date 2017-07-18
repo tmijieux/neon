@@ -1,10 +1,12 @@
 #include <assert.h>
 #include <math.h>
+#include <immintrin.h>
 
-#include "cblas.h"
+//#include "cblas.h"
 
+  #include "mkl.h"
 
-void neon_cblas_dgemm(
+void neon_cblas_dgemm_reference(
     const CBLAS_LAYOUT layout,
     const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
     const int M, const int N, const int K,
@@ -23,14 +25,12 @@ void neon_cblas_dgemm(
         for (int i = 0; i < M; ++i) {
             C[j*ldc+i] = (beta/alpha) * C[j*ldc+i];
             for (int k = 0; k < K; ++k) {
-                C[j*ldc+i] = C[j*ldc+i] + A[i*lda+k] * B[j*ldb+k];
+                C[j*ldc+i] = C[j*ldc+i] + A[k*lda+i] * B[j*ldb+k];
             }
             C[j*ldc+i] = alpha * C[j*ldc+i];
         }
     }
 }
-
-#include <immintrin.h>
 
 void neon_cblas_dgemm_avx2(
     const CBLAS_LAYOUT layout,
@@ -72,7 +72,7 @@ void neon_cblas_dgemm_avx2(
 
 /* TRANS A */
 
-void neon_cblas_dgemm_transA(
+void neon_cblas_dgemm_transA_reference(
     const CBLAS_LAYOUT layout,
     const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
     const int M, const int N, const int K,
@@ -233,8 +233,11 @@ void neon_cblas_dgemm_transA_avx2_multirow(
     }
 }
 
+static _Atomic int tile_size = 128;
+void neon_set_tile_size(const int TS) { tile_size = TS; }
+int neon_get_tile_size(void) { return tile_size; }
 
-void neon_cblas_dgemm_transA_tiled(
+void neon_cblas_dgemm_transA_tiled_task(
     const CBLAS_LAYOUT layout,
     const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
     const int M, const int N, const int K,
@@ -248,7 +251,7 @@ void neon_cblas_dgemm_transA_tiled(
     assert( alpha != 0.0 );
     assert( isnormal(alpha) );
 
-    const int TS = 128;
+    const int TS = neon_get_tile_size();
 
     const int Mm = M / TS;
     const int mM = M % TS;
@@ -264,7 +267,296 @@ void neon_cblas_dgemm_transA_tiled(
 
     #pragma omp parallel
     {
-        #pragma omp for collapse(2) schedule(guided)
+        #pragma omp single
+        {
+            for (int j = 0; j < Nn; ++j) {
+                for (int i = 0; i < Mm; ++i) {
+                    for (int k = 0; k < Kk; ++k) {
+                        #pragma omp task // in(C[i][j]) out(C[i][j])
+                        {
+                            const double beta_l = (k == 0) ? beta : 1.0;
+                            neon_cblas_dgemm_transA_avx2_multirow(
+                                /**/           layout,
+                                /**/           TransA, TransB,
+                                /**/           TS, TS, TS,
+                                /**/           alpha,  A+TS*(lda*i+k), lda,
+                                /**/                   B+TS*(ldb*j+k), ldb,
+                                /**/           beta_l, C+TS*(ldc*j+i), ldc       );
+                        }
+                    }
+
+                    #pragma omp task // in(C[i][j]) out(C[i][j])
+                    {
+                        const double beta_l = (Kk == 0) ? beta : 1.0;
+                        neon_cblas_dgemm_transA_avx2_multirow(
+                            /**/           layout,
+                            /**/           TransA, TransB,
+                            /**/           TS, TS, kK,
+                            /**/           alpha,  A+TS*(lda*i+Kk), lda,
+                            /**/                   B+TS*(ldb*j+Kk), ldb,
+                            /**/           beta_l, C+TS*(ldc*j+i), ldc       );
+                    }
+                }
+            }
+
+            // last block column
+            for (int i = 0; i < Mm; ++i) {
+                for (int k = 0; k < Kk; ++k) {
+                    #pragma omp task // in(C[i][Nn]) out(C[i][Nn])
+                    {
+                        const double beta_l = (k == 0) ? beta : 1.0;
+                        neon_cblas_dgemm_transA_avx2_multirow(
+                            /**/           layout,
+                            /**/           TransA, TransB,
+                            /**/           TS, nN, TS,
+                            /**/           alpha,  A+TS*(lda*i+k), lda,
+                            /**/                   B+TS*(ldb*Nn+k), ldb,
+                            /**/           beta_l, C+TS*(ldc*Nn+i), ldc       );
+                    }
+                }
+                #pragma omp task // in(C[i][Nn]) out(C[i][Nn])
+                {
+
+                    const double beta_l = (Kk == 0) ? beta : 1.0;
+                    neon_cblas_dgemm_transA_avx2_multirow(
+                        /**/           layout,
+                        /**/           TransA, TransB,
+                        /**/           TS, nN, kK,
+                        /**/           alpha,  A+TS*(lda*i+Kk), lda,
+                        /**/                   B+TS*(ldb*Nn+Kk), ldb,
+                        /**/           beta_l, C+TS*(ldc*Nn+i), ldc       );
+                }
+            }
+
+            // last block row
+            for (int j = 0; j < Nn; ++j) {
+                for (int k = 0; k < Kk; ++k) {
+                    #pragma omp task // in(C[Mm][j]) out(C[Mm][j])
+                    {
+
+                        const double beta_l = (k == 0) ? beta : 1.0;
+                        neon_cblas_dgemm_transA_avx2_multirow(
+                            /**/           layout,
+                            /**/           TransA, TransB,
+                            /**/           mM, TS, TS,
+                            /**/           alpha,  A+TS*(lda*Mm+k), lda,
+                            /**/                   B+TS*(ldb*j+k), ldb,
+                            /**/           beta_l, C+TS*(ldc*j+Mm), ldc       );
+                    }
+                }
+
+                #pragma omp task // in(C[Mm][j]) out(C[Mm][j])
+                {
+
+                    const double beta_l = (Kk == 0) ? beta : 1.0;
+                    neon_cblas_dgemm_transA_avx2_multirow(
+                        /**/           layout,
+                        /**/           TransA, TransB,
+                        /**/           mM, TS, kK,
+                        /**/           alpha,  A+TS*(lda*Mm+Kk), lda,
+                        /**/                   B+TS*(ldb*j+Kk), ldb,
+                        /**/           beta_l, C+TS*(ldc*j+Mm), ldc       );
+                }
+            }
+
+            // last block right bottom corner
+            for (int k = 0; k < Kk; ++k) {
+                #pragma omp task // in(C[Mm][j]) out(C[Mm][j])
+                {
+                    const double beta_l = (k == 0) ? beta : 1.0;
+                    neon_cblas_dgemm_transA_avx2_multirow(
+                        /**/           layout,
+                        /**/           TransA, TransB,
+                        /**/           mM, nN, TS,
+                        /**/           alpha,  A+TS*(lda*Mm+k), lda,
+                        /**/                   B+TS*(ldb*Nn+k), ldb,
+                        /**/           beta_l, C+TS*(ldc*Nn+Mm), ldc       );
+                }
+            }
+            #pragma omp task // in(C[Mm][Nn]) out(C[Mm][Nn])
+            {
+                const double beta_l = (Kk == 0) ? beta : 1.0;
+                neon_cblas_dgemm_transA_avx2_multirow(
+                    /**/           layout,
+                    /**/           TransA, TransB,
+                    /**/           mM, nN, kK,
+                    /**/           alpha,  A+TS*(lda*Mm+Kk), lda,
+                    /**/                   B+TS*(ldb*Nn+Kk), ldb,
+                    /**/           beta_l, C+TS*(ldc*Nn+Mm), ldc       );
+            }
+
+        }
+    } // end pragma omp parallel
+}
+
+void neon_cblas_dgemm_transA_tiled_plus_mkl(
+    const CBLAS_LAYOUT layout,
+    const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
+    const int M, const int N, const int K,
+    const double alpha, const double * restrict const A, const int lda,
+    /**/                const double * restrict const B, const int ldb,
+    const double beta,        double * restrict const C, const int ldc   )
+{
+    assert( layout == CblasColMajor );
+    assert( TransA == CblasTrans );
+    assert( TransB == CblasNoTrans );
+    assert( alpha != 0.0 );
+    assert( isnormal(alpha) );
+
+    /* int num_threads = mkl_get_num_threads(); */
+    /* assert( num_threads == 2 ); */
+
+    mkl_set_num_threads(1);
+
+    const int TS = neon_get_tile_size();
+
+    const int Mm = M / TS;
+    const int mM = M % TS;
+    //const int MM = M - mM;
+
+    const int Nn = N / TS;
+    const int nN = N % TS;
+    //const int NN = N - nN;
+
+    const int Kk = K / TS;
+    const int kK = K % TS;
+    //const int KK = K - kK;
+
+    #pragma omp parallel
+    {
+        #pragma omp for collapse(2) schedule(static)
+        for (int j = 0; j < Nn; ++j) {
+            for (int i = 0; i < Mm; ++i) {
+                for (int k = 0; k < Kk; ++k) {
+                    const double beta_l = (k == 0) ? beta : 1.0;
+                    cblas_dgemm(
+                        /**/           layout,
+                        /**/           TransA, TransB,
+                        /**/           TS, TS, TS,
+                        /**/           alpha,  A+TS*(lda*i+k), lda,
+                        /**/                   B+TS*(ldb*j+k), ldb,
+                        /**/           beta_l, C+TS*(ldc*j+i), ldc       );
+                }
+
+                const double beta_l = (Kk == 0) ? beta : 1.0;
+                cblas_dgemm(
+                    /**/           layout,
+                    /**/           TransA, TransB,
+                    /**/           TS, TS, kK,
+                    /**/           alpha,  A+TS*(lda*i+Kk), lda,
+                    /**/                   B+TS*(ldb*j+Kk), ldb,
+                    /**/           beta_l, C+TS*(ldc*j+i), ldc       );
+            }
+        }
+
+        // last block column
+        #pragma omp for schedule(static)
+        for (int i = 0; i < Mm; ++i) {
+            for (int k = 0; k < Kk; ++k) {
+                const double beta_l = (k == 0) ? beta : 1.0;
+                cblas_dgemm(
+                    /**/           layout,
+                    /**/           TransA, TransB,
+                    /**/           TS, nN, TS,
+                    /**/           alpha,  A+TS*(lda*i+k), lda,
+                    /**/                   B+TS*(ldb*Nn+k), ldb,
+                    /**/           beta_l, C+TS*(ldc*Nn+i), ldc       );
+            }
+            const double beta_l = (Kk == 0) ? beta : 1.0;
+            cblas_dgemm(
+                /**/           layout,
+                /**/           TransA, TransB,
+                /**/           TS, nN, kK,
+                /**/           alpha,  A+TS*(lda*i+Kk), lda,
+                /**/                   B+TS*(ldb*Nn+Kk), ldb,
+                /**/           beta_l, C+TS*(ldc*Nn+i), ldc       );
+        }
+
+        // last block row
+        #pragma omp for schedule(static)
+        for (int j = 0; j < Nn; ++j) {
+            for (int k = 0; k < Kk; ++k) {
+                const double beta_l = (k == 0) ? beta : 1.0;
+                cblas_dgemm(
+                    /**/           layout,
+                    /**/           TransA, TransB,
+                    /**/           mM, TS, TS,
+                    /**/           alpha,  A+TS*(lda*Mm+k), lda,
+                    /**/                   B+TS*(ldb*j+k), ldb,
+                    /**/           beta_l, C+TS*(ldc*j+Mm), ldc       );
+            }
+            const double beta_l = (Kk == 0) ? beta : 1.0;
+            cblas_dgemm(
+                /**/           layout,
+                /**/           TransA, TransB,
+                /**/           mM, TS, kK,
+                /**/           alpha,  A+TS*(lda*Mm+Kk), lda,
+                /**/                   B+TS*(ldb*j+Kk), ldb,
+                /**/           beta_l, C+TS*(ldc*j+Mm), ldc       );
+        }
+
+        // last block right bottom corner
+
+        #pragma omp single
+        {
+            for (int k = 0; k < Kk; ++k) {
+                const double beta_l = (k == 0) ? beta : 1.0;
+                cblas_dgemm(
+                    /**/           layout,
+                    /**/           TransA, TransB,
+                    /**/           mM, nN, TS,
+                    /**/           alpha,  A+TS*(lda*Mm+k), lda,
+                    /**/                   B+TS*(ldb*Nn+k), ldb,
+                    /**/           beta_l, C+TS*(ldc*Nn+Mm), ldc       );
+            }
+            const double beta_l = (Kk == 0) ? beta : 1.0;
+            cblas_dgemm(
+                /**/           layout,
+                /**/           TransA, TransB,
+                /**/           mM, nN, kK,
+                /**/           alpha,  A+TS*(lda*Mm+Kk), lda,
+                /**/                   B+TS*(ldb*Nn+Kk), ldb,
+                /**/           beta_l, C+TS*(ldc*Nn+Mm), ldc       );
+
+        }
+    }
+    mkl_set_num_threads(2);
+}
+
+void neon_cblas_dgemm_transA_tiled(
+    const CBLAS_LAYOUT layout,
+    const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
+    const int M, const int N, const int K,
+    const double alpha, const double * restrict const A, const int lda,
+    /**/                const double * restrict const B, const int ldb,
+    const double beta,        double * restrict const C, const int ldc   )
+{
+    assert( layout == CblasColMajor );
+    assert( TransA == CblasTrans );
+    assert( TransB == CblasNoTrans );
+    assert( alpha != 0.0 );
+    assert( isnormal(alpha) );
+
+    /* int num_threads = mkl_get_num_threads(); */
+    /* assert( num_threads == 2 ); */
+
+    const int TS = neon_get_tile_size();
+
+    const int Mm = M / TS;
+    const int mM = M % TS;
+    //const int MM = M - mM;
+
+    const int Nn = N / TS;
+    const int nN = N % TS;
+    //const int NN = N - nN;
+
+    const int Kk = K / TS;
+    const int kK = K % TS;
+    //const int KK = K - kK;
+
+    #pragma omp parallel
+    {
+        #pragma omp for collapse(2) schedule(static)
         for (int j = 0; j < Nn; ++j) {
             for (int i = 0; i < Mm; ++i) {
                 for (int k = 0; k < Kk; ++k) {
@@ -290,7 +582,7 @@ void neon_cblas_dgemm_transA_tiled(
         }
 
         // last block column
-        #pragma omp for schedule(guided)
+        #pragma omp for schedule(static)
         for (int i = 0; i < Mm; ++i) {
             for (int k = 0; k < Kk; ++k) {
                 const double beta_l = (k == 0) ? beta : 1.0;
@@ -313,7 +605,7 @@ void neon_cblas_dgemm_transA_tiled(
         }
 
         // last block row
-        #pragma omp for schedule(guided)
+        #pragma omp for schedule(static)
         for (int j = 0; j < Nn; ++j) {
             for (int k = 0; k < Kk; ++k) {
                 const double beta_l = (k == 0) ? beta : 1.0;
@@ -336,6 +628,7 @@ void neon_cblas_dgemm_transA_tiled(
         }
 
         // last block right bottom corner
+
         #pragma omp single
         {
             for (int k = 0; k < Kk; ++k) {
@@ -350,6 +643,384 @@ void neon_cblas_dgemm_transA_tiled(
             }
             const double beta_l = (Kk == 0) ? beta : 1.0;
             neon_cblas_dgemm_transA_avx2_multirow(
+                /**/           layout,
+                /**/           TransA, TransB,
+                /**/           mM, nN, kK,
+                /**/           alpha,  A+TS*(lda*Mm+Kk), lda,
+                /**/                   B+TS*(ldb*Nn+Kk), ldb,
+                /**/           beta_l, C+TS*(ldc*Nn+Mm), ldc       );
+
+        }
+    }
+}
+
+
+/**** MULTI LEVEL TILED *********/
+
+static int tile_size_L1 = 50;
+static int tile_size_L3 = 128;
+
+static int tile_size_L2 = 256;
+
+void neon_set_tile_size_L1(const int TS) { tile_size_L1 = TS; }
+void neon_set_tile_size_L2(const int TS) { tile_size_L2 = TS; }
+void neon_set_tile_size_L3(const int TS) { tile_size_L3 = TS; }
+
+int neon_get_tile_size_L1(void) {  return tile_size_L1; }
+int neon_get_tile_size_L2(void) {  return tile_size_L2; }
+int neon_get_tile_size_L3(void) {  return tile_size_L3; }
+
+void neon_cblas_dgemm_transA_tiled_L1(
+    const CBLAS_LAYOUT layout,
+    const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
+    const int M, const int N, const int K,
+    const double alpha, const double * restrict const A, const int lda,
+    /**/                const double * restrict const B, const int ldb,
+    const double beta,        double * restrict const C, const int ldc   )
+{
+    assert( layout == CblasColMajor );
+    assert( TransA == CblasTrans );
+    assert( TransB == CblasNoTrans );
+    assert( alpha != 0.0 );
+    assert( isnormal(alpha) );
+
+    const int TS = neon_get_tile_size_L1();
+
+    const int Mm = M / TS;
+    const int mM = M % TS;
+    //const int MM = M - mM;
+
+    const int Nn = N / TS;
+    const int nN = N % TS;
+    //const int NN = N - nN;
+
+    const int Kk = K / TS;
+    const int kK = K % TS;
+    //const int KK = K - kK;
+
+    for (int j = 0; j < Nn; ++j) {
+        for (int i = 0; i < Mm; ++i) {
+            for (int k = 0; k < Kk; ++k) {
+                const double beta_l = (k == 0) ? beta : 1.0;
+                neon_cblas_dgemm_transA_avx2_multirow(
+                    /**/           layout,
+                    /**/           TransA, TransB,
+                    /**/           TS, TS, TS,
+                    /**/           alpha,  A+TS*(lda*i+k), lda,
+                    /**/                   B+TS*(ldb*j+k), ldb,
+                    /**/           beta_l, C+TS*(ldc*j+i), ldc       );
+            }
+
+            const double beta_l = (Kk == 0) ? beta : 1.0;
+            neon_cblas_dgemm_transA_avx2_multirow(
+                /**/           layout,
+                /**/           TransA, TransB,
+                /**/           TS, TS, kK,
+                /**/           alpha,  A+TS*(lda*i+Kk), lda,
+                /**/                   B+TS*(ldb*j+Kk), ldb,
+                /**/           beta_l, C+TS*(ldc*j+i), ldc       );
+        }
+    }
+
+    // last block column
+    for (int i = 0; i < Mm; ++i) {
+        for (int k = 0; k < Kk; ++k) {
+            const double beta_l = (k == 0) ? beta : 1.0;
+            neon_cblas_dgemm_transA_avx2_multirow(
+                /**/           layout,
+                /**/           TransA, TransB,
+                /**/           TS, nN, TS,
+                /**/           alpha,  A+TS*(lda*i+k), lda,
+                /**/                   B+TS*(ldb*Nn+k), ldb,
+                /**/           beta_l, C+TS*(ldc*Nn+i), ldc       );
+        }
+        const double beta_l = (Kk == 0) ? beta : 1.0;
+        neon_cblas_dgemm_transA_avx2_multirow(
+            /**/           layout,
+            /**/           TransA, TransB,
+            /**/           TS, nN, kK,
+            /**/           alpha,  A+TS*(lda*i+Kk), lda,
+            /**/                   B+TS*(ldb*Nn+Kk), ldb,
+            /**/           beta_l, C+TS*(ldc*Nn+i), ldc       );
+    }
+
+    // last block row
+    for (int j = 0; j < Nn; ++j) {
+        for (int k = 0; k < Kk; ++k) {
+            const double beta_l = (k == 0) ? beta : 1.0;
+            neon_cblas_dgemm_transA_avx2_multirow(
+                /**/           layout,
+                /**/           TransA, TransB,
+                /**/           mM, TS, TS,
+                /**/           alpha,  A+TS*(lda*Mm+k), lda,
+                /**/                   B+TS*(ldb*j+k), ldb,
+                /**/           beta_l, C+TS*(ldc*j+Mm), ldc       );
+        }
+        const double beta_l = (Kk == 0) ? beta : 1.0;
+        neon_cblas_dgemm_transA_avx2_multirow(
+            /**/           layout,
+            /**/           TransA, TransB,
+            /**/           mM, TS, kK,
+            /**/           alpha,  A+TS*(lda*Mm+Kk), lda,
+            /**/                   B+TS*(ldb*j+Kk), ldb,
+            /**/           beta_l, C+TS*(ldc*j+Mm), ldc       );
+    }
+
+    // last block right bottom corner
+    for (int k = 0; k < Kk; ++k) {
+        const double beta_l = (k == 0) ? beta : 1.0;
+        neon_cblas_dgemm_transA_avx2_multirow(
+            /**/           layout,
+            /**/           TransA, TransB,
+            /**/           mM, nN, TS,
+            /**/           alpha,  A+TS*(lda*Mm+k), lda,
+            /**/                   B+TS*(ldb*Nn+k), ldb,
+            /**/           beta_l, C+TS*(ldc*Nn+Mm), ldc       );
+    }
+    const double beta_l = (Kk == 0) ? beta : 1.0;
+    neon_cblas_dgemm_transA_avx2_multirow(
+        /**/           layout,
+        /**/           TransA, TransB,
+        /**/           mM, nN, kK,
+        /**/           alpha,  A+TS*(lda*Mm+Kk), lda,
+        /**/                   B+TS*(ldb*Nn+Kk), ldb,
+        /**/           beta_l, C+TS*(ldc*Nn+Mm), ldc       );
+}
+
+
+void neon_cblas_dgemm_transA_tiled_L2(
+    const CBLAS_LAYOUT layout,
+    const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
+    const int M, const int N, const int K,
+    const double alpha, const double * restrict const A, const int lda,
+    /**/                const double * restrict const B, const int ldb,
+    const double beta,        double * restrict const C, const int ldc   )
+{
+    assert( layout == CblasColMajor );
+    assert( TransA == CblasTrans );
+    assert( TransB == CblasNoTrans );
+    assert( alpha != 0.0 );
+    assert( isnormal(alpha) );
+
+    const int TS = neon_get_tile_size_L2();
+
+    const int Mm = M / TS;
+    const int mM = M % TS;
+    //const int MM = M - mM;
+
+    const int Nn = N / TS;
+    const int nN = N % TS;
+    //const int NN = N - nN;
+
+    const int Kk = K / TS;
+    const int kK = K % TS;
+    //const int KK = K - kK;
+
+    for (int j = 0; j < Nn; ++j) {
+        for (int i = 0; i < Mm; ++i) {
+            for (int k = 0; k < Kk; ++k) {
+                const double beta_l = (k == 0) ? beta : 1.0;
+                neon_cblas_dgemm_transA_tiled_L1(
+                    /**/           layout,
+                    /**/           TransA, TransB,
+                    /**/           TS, TS, TS,
+                    /**/           alpha,  A+TS*(lda*i+k), lda,
+                    /**/                   B+TS*(ldb*j+k), ldb,
+                    /**/           beta_l, C+TS*(ldc*j+i), ldc       );
+            }
+
+            const double beta_l = (Kk == 0) ? beta : 1.0;
+            neon_cblas_dgemm_transA_tiled_L1(
+                /**/           layout,
+                /**/           TransA, TransB,
+                /**/           TS, TS, kK,
+                /**/           alpha,  A+TS*(lda*i+Kk), lda,
+                /**/                   B+TS*(ldb*j+Kk), ldb,
+                /**/           beta_l, C+TS*(ldc*j+i), ldc       );
+        }
+    }
+
+    // last block column
+    for (int i = 0; i < Mm; ++i) {
+        for (int k = 0; k < Kk; ++k) {
+            const double beta_l = (k == 0) ? beta : 1.0;
+            neon_cblas_dgemm_transA_tiled_L1(
+                /**/           layout,
+                /**/           TransA, TransB,
+                /**/           TS, nN, TS,
+                /**/           alpha,  A+TS*(lda*i+k), lda,
+                /**/                   B+TS*(ldb*Nn+k), ldb,
+                /**/           beta_l, C+TS*(ldc*Nn+i), ldc       );
+        }
+        const double beta_l = (Kk == 0) ? beta : 1.0;
+        neon_cblas_dgemm_transA_tiled_L1(
+            /**/           layout,
+            /**/           TransA, TransB,
+            /**/           TS, nN, kK,
+            /**/           alpha,  A+TS*(lda*i+Kk), lda,
+            /**/                   B+TS*(ldb*Nn+Kk), ldb,
+            /**/           beta_l, C+TS*(ldc*Nn+i), ldc       );
+    }
+
+    // last block row
+    for (int j = 0; j < Nn; ++j) {
+        for (int k = 0; k < Kk; ++k) {
+            const double beta_l = (k == 0) ? beta : 1.0;
+            neon_cblas_dgemm_transA_tiled_L1(
+                /**/           layout,
+                /**/           TransA, TransB,
+                /**/           mM, TS, TS,
+                /**/           alpha,  A+TS*(lda*Mm+k), lda,
+                /**/                   B+TS*(ldb*j+k), ldb,
+                /**/           beta_l, C+TS*(ldc*j+Mm), ldc       );
+        }
+        const double beta_l = (Kk == 0) ? beta : 1.0;
+        neon_cblas_dgemm_transA_tiled_L1(
+            /**/           layout,
+            /**/           TransA, TransB,
+            /**/           mM, TS, kK,
+            /**/           alpha,  A+TS*(lda*Mm+Kk), lda,
+            /**/                   B+TS*(ldb*j+Kk), ldb,
+            /**/           beta_l, C+TS*(ldc*j+Mm), ldc       );
+    }
+
+    // last block right bottom corner
+    for (int k = 0; k < Kk; ++k) {
+        const double beta_l = (k == 0) ? beta : 1.0;
+        neon_cblas_dgemm_transA_tiled_L1(
+            /**/           layout,
+            /**/           TransA, TransB,
+            /**/           mM, nN, TS,
+            /**/           alpha,  A+TS*(lda*Mm+k), lda,
+            /**/                   B+TS*(ldb*Nn+k), ldb,
+            /**/           beta_l, C+TS*(ldc*Nn+Mm), ldc       );
+    }
+    const double beta_l = (Kk == 0) ? beta : 1.0;
+    neon_cblas_dgemm_transA_tiled_L1(
+        /**/           layout,
+        /**/           TransA, TransB,
+        /**/           mM, nN, kK,
+        /**/           alpha,  A+TS*(lda*Mm+Kk), lda,
+        /**/                   B+TS*(ldb*Nn+Kk), ldb,
+        /**/           beta_l, C+TS*(ldc*Nn+Mm), ldc       );
+}
+
+void neon_cblas_dgemm_transA_tiled_L3(
+    const CBLAS_LAYOUT layout,
+    const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
+    const int M, const int N, const int K,
+    const double alpha, const double * restrict const A, const int lda,
+    /**/                const double * restrict const B, const int ldb,
+    const double beta,        double * restrict const C, const int ldc   )
+{
+    assert( layout == CblasColMajor );
+    assert( TransA == CblasTrans );
+    assert( TransB == CblasNoTrans );
+    assert( alpha != 0.0 );
+    assert( isnormal(alpha) );
+
+    const int TS = neon_get_tile_size_L3();
+
+    const int Mm = M / TS;
+    const int mM = M % TS;
+    //const int MM = M - mM;
+
+    const int Nn = N / TS;
+    const int nN = N % TS;
+    //const int NN = N - nN;
+
+    const int Kk = K / TS;
+    const int kK = K % TS;
+    //const int KK = K - kK;
+
+    #pragma omp parallel
+    {
+        #pragma omp for collapse(2) schedule(static)
+        for (int j = 0; j < Nn; ++j) {
+            for (int i = 0; i < Mm; ++i) {
+                for (int k = 0; k < Kk; ++k) {
+                    const double beta_l = (k == 0) ? beta : 1.0;
+                    neon_cblas_dgemm_transA_tiled_L1(
+                        /**/           layout,
+                        /**/           TransA, TransB,
+                        /**/           TS, TS, TS,
+                        /**/           alpha,  A+TS*(lda*i+k), lda,
+                        /**/                   B+TS*(ldb*j+k), ldb,
+                        /**/           beta_l, C+TS*(ldc*j+i), ldc       );
+                }
+
+                const double beta_l = (Kk == 0) ? beta : 1.0;
+                neon_cblas_dgemm_transA_tiled_L1(
+                    /**/           layout,
+                    /**/           TransA, TransB,
+                    /**/           TS, TS, kK,
+                    /**/           alpha,  A+TS*(lda*i+Kk), lda,
+                    /**/                   B+TS*(ldb*j+Kk), ldb,
+                    /**/           beta_l, C+TS*(ldc*j+i), ldc       );
+            }
+        }
+
+        // last block column
+        #pragma omp for schedule(static)
+        for (int i = 0; i < Mm; ++i) {
+            for (int k = 0; k < Kk; ++k) {
+                const double beta_l = (k == 0) ? beta : 1.0;
+                neon_cblas_dgemm_transA_tiled_L1(
+                    /**/           layout,
+                    /**/           TransA, TransB,
+                    /**/           TS, nN, TS,
+                    /**/           alpha,  A+TS*(lda*i+k), lda,
+                    /**/                   B+TS*(ldb*Nn+k), ldb,
+                    /**/           beta_l, C+TS*(ldc*Nn+i), ldc       );
+            }
+            const double beta_l = (Kk == 0) ? beta : 1.0;
+            neon_cblas_dgemm_transA_tiled_L1(
+                /**/           layout,
+                /**/           TransA, TransB,
+                /**/           TS, nN, kK,
+                /**/           alpha,  A+TS*(lda*i+Kk), lda,
+                /**/                   B+TS*(ldb*Nn+Kk), ldb,
+                /**/           beta_l, C+TS*(ldc*Nn+i), ldc       );
+        }
+
+        // last block row
+        #pragma omp for schedule(static)
+        for (int j = 0; j < Nn; ++j) {
+            for (int k = 0; k < Kk; ++k) {
+                const double beta_l = (k == 0) ? beta : 1.0;
+                neon_cblas_dgemm_transA_tiled_L1(
+                    /**/           layout,
+                    /**/           TransA, TransB,
+                    /**/           mM, TS, TS,
+                    /**/           alpha,  A+TS*(lda*Mm+k), lda,
+                    /**/                   B+TS*(ldb*j+k), ldb,
+                    /**/           beta_l, C+TS*(ldc*j+Mm), ldc       );
+            }
+            const double beta_l = (Kk == 0) ? beta : 1.0;
+            neon_cblas_dgemm_transA_tiled_L1(
+                /**/           layout,
+                /**/           TransA, TransB,
+                /**/           mM, TS, kK,
+                /**/           alpha,  A+TS*(lda*Mm+Kk), lda,
+                /**/                   B+TS*(ldb*j+Kk), ldb,
+                /**/           beta_l, C+TS*(ldc*j+Mm), ldc       );
+        }
+
+        // last block right bottom corner
+        #pragma omp single
+        {
+            for (int k = 0; k < Kk; ++k) {
+                const double beta_l = (k == 0) ? beta : 1.0;
+                neon_cblas_dgemm_transA_tiled_L1(
+                    /**/           layout,
+                    /**/           TransA, TransB,
+                    /**/           mM, nN, TS,
+                    /**/           alpha,  A+TS*(lda*Mm+k), lda,
+                    /**/                   B+TS*(ldb*Nn+k), ldb,
+                    /**/           beta_l, C+TS*(ldc*Nn+Mm), ldc       );
+            }
+            const double beta_l = (Kk == 0) ? beta : 1.0;
+            neon_cblas_dgemm_transA_tiled_L1(
                 /**/           layout,
                 /**/           TransA, TransB,
                 /**/           mM, nN, kK,
