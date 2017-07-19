@@ -55,3 +55,6 @@ ggplot(df, aes(x=N, y=gflops_s, color=kernel)) +
     geom_point() + geom_smooth(se=F) +
     ggtitle("GEMM Kernel performance")
    #+end_src
+
+   #+results:
+   [[file:/tmp/babel-1366HSw/figure1366RDP.png]]

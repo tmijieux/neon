@@ -32,11 +32,24 @@ extern void neon_cblas_dgemm_transA_avx2_multirow( CBLAS_LAYOUT layout, CBLAS_TR
                                                    const int lda, const double *B, const int ldb,
                                                    const double beta, double *C, const int ldc);
 
+void neon_cblas_dgemm_transA_tiled_task( CBLAS_LAYOUT layout, CBLAS_TRANSPOSE TransA,
+                                         CBLAS_TRANSPOSE TransB, const int M, const int N,
+                                         const int K, const double alpha, const double *A,
+                                         const int lda, const double *B, const int ldb,
+                                         const double beta, double *C, const int ldc    );
+
+
 void neon_cblas_dgemm_transA_tiled( CBLAS_LAYOUT layout, CBLAS_TRANSPOSE TransA,
                                     CBLAS_TRANSPOSE TransB, const int M, const int N,
                                     const int K, const double alpha, const double *A,
                                     const int lda, const double *B, const int ldb,
                                     const double beta, double *C, const int ldc    );
+
+void neon_cblas_dgemm_transA_tiled_multi( CBLAS_LAYOUT layout, CBLAS_TRANSPOSE TransA,
+                                          CBLAS_TRANSPOSE TransB, const int M, const int N,
+                                          const int K, const double alpha, const double *A,
+                                          const int lda, const double *B, const int ldb,
+                                          const double beta, double *C, const int ldc    );
 
 void neon_cblas_dgemm_transA_tiled_L3( CBLAS_LAYOUT layout, CBLAS_TRANSPOSE TransA,
                                        CBLAS_TRANSPOSE TransB, const int M, const int N,
@@ -50,6 +63,15 @@ void neon_cblas_dgemm_transA_tiled_plus_mkl( CBLAS_LAYOUT layout, CBLAS_TRANSPOS
                                              const int K, const double alpha, const double *A,
                                              const int lda, const double *B, const int ldb,
                                              const double beta, double *C, const int ldc    );
+
+void neon_cblas_dgemm_transA_tiled_task_mkl(
+    const CBLAS_LAYOUT layout,
+    const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
+    const int M, const int N, const int K,
+    const double alpha, const double * restrict const A, const int lda,
+    /**/                const double * restrict const B, const int ldb,
+    const double beta,        double * restrict const C, const int ldc   );
+
 
 #define GEMM_ADD(M_, N_, K_) ((double)(M_) * (double)(N_) * (double)(K_))
 #define GEMM_MUL(M_, N_, K_) ((double)(M_) * (double)(N_) * (double)(K_))
@@ -172,7 +194,100 @@ void time_neon_dgemm_tiled(const int N, int num_threads)
     const double length = timer_get_length(&timer);
     const double gemm_flops = GEMM_ADD(N, N, N) + GEMM_MUL(N, N, N);
     const double gflops_s = gemm_flops / (length*1000000000.0);
-    printf("%d,%g,%g,%g,neon_dgemm_tiled_%d\n", N, length, gemm_flops, gflops_s, num_threads);
+    printf("%d,%g,%g,%g,neon_dgemm_tiled_uni_%d\n", N, length, gemm_flops, gflops_s, num_threads);
+}
+
+void time_neon_dgemm_tiled_task(const int N, int num_threads)
+{
+    double *A = dalloc_matrix(N, N, N);
+    double *B = dalloc_matrix(N, N, N);
+    double *C = dalloc_matrix(N, N, N);
+    double alpha = 1.0;
+    double beta = 0.0;
+    // fprintf(stderr, "Allocation done.\n");
+
+    struct timer timer;
+    timer_init(&timer);
+
+    omp_set_num_threads(num_threads);
+
+    timer_start(&timer);
+    neon_cblas_dgemm_transA_tiled_task( CblasColMajor, CblasTrans, CblasNoTrans,
+                                        N, N, N,
+                                        alpha, A, N,
+                                        /**/   B, N,
+                                        beta,  C, N    );
+    timer_stop(&timer);
+
+    // fprintf(stderr, "dgemm done.\n");
+    free(A); free(B); free(C);
+
+    const double length = timer_get_length(&timer);
+    const double gemm_flops = GEMM_ADD(N, N, N) + GEMM_MUL(N, N, N);
+    const double gflops_s = gemm_flops / (length*1000000000.0);
+    printf("%d,%g,%g,%g,neon_dgemm_tiled_task_%d\n", N, length, gemm_flops, gflops_s, num_threads);
+}
+
+void time_neon_dgemm_tiled_task_mkl(const int N, int num_threads)
+{
+    double *A = dalloc_matrix(N, N, N);
+    double *B = dalloc_matrix(N, N, N);
+    double *C = dalloc_matrix(N, N, N);
+    double alpha = 1.0;
+    double beta = 0.0;
+    // fprintf(stderr, "Allocation done.\n");
+
+    struct timer timer;
+    timer_init(&timer);
+
+    omp_set_num_threads(num_threads);
+
+    timer_start(&timer);
+    neon_cblas_dgemm_transA_tiled_task_mkl( CblasColMajor, CblasTrans, CblasNoTrans,
+                                            N, N, N,
+                                            alpha, A, N,
+                                            /**/   B, N,
+                                            beta,  C, N    );
+    timer_stop(&timer);
+
+    // fprintf(stderr, "dgemm done.\n");
+    free(A); free(B); free(C);
+
+    const double length = timer_get_length(&timer);
+    const double gemm_flops = GEMM_ADD(N, N, N) + GEMM_MUL(N, N, N);
+    const double gflops_s = gemm_flops / (length*1000000000.0);
+    printf("%d,%g,%g,%g,neon_dgemm_tiled_task_mkl_%d\n", N, length, gemm_flops, gflops_s, num_threads);
+}
+
+void time_neon_dgemm_tiled_multi(const int N, int num_threads)
+{
+    double *A = dalloc_matrix(N, N, N);
+    double *B = dalloc_matrix(N, N, N);
+    double *C = dalloc_matrix(N, N, N);
+    double alpha = 1.0;
+    double beta = 0.0;
+    // fprintf(stderr, "Allocation done.\n");
+
+    struct timer timer;
+    timer_init(&timer);
+
+    omp_set_num_threads(num_threads);
+
+    timer_start(&timer);
+    neon_cblas_dgemm_transA_tiled_multi( CblasColMajor, CblasTrans, CblasNoTrans,
+                                         N, N, N,
+                                         alpha, A, N,
+                                         /**/   B, N,
+                                         beta,  C, N    );
+    timer_stop(&timer);
+
+    // fprintf(stderr, "dgemm done.\n");
+    free(A); free(B); free(C);
+
+    const double length = timer_get_length(&timer);
+    const double gemm_flops = GEMM_ADD(N, N, N) + GEMM_MUL(N, N, N);
+    const double gflops_s = gemm_flops / (length*1000000000.0);
+    printf("%d,%g,%g,%g,neon_dgemm_tiled_multi_%d\n", N, length, gemm_flops, gflops_s, num_threads);
 }
 
 void time_neon_dgemm_tiled_mkl(const int N, int num_threads)
@@ -253,7 +368,6 @@ void time_mkl_dgemm(const int N, int num_threads)
 
     struct timer timer;
     timer_init(&timer);
-
     mkl_set_num_threads(num_threads);
 
     timer_start(&timer);
@@ -289,27 +403,42 @@ int main(int argc, char *argv[])
         for (int i = 100; i < 2000; i += 100) {
             time_mkl_dgemm(i, 2);
         }
-
         /* for (int i = 100; i < 1500; i += 100) { */
         /*     time_neon_dgemm(i); */
         /* } */
         /* for (int i = 100; i < 1500; i += 100) { */
         /*     time_neon_dgemm_multi(i); */
         /* } */
-
+        /* for (int i = 100; i < 2000; i += 100) { */
+        /*     time_neon_dgemm_tiled(i, 1); */
+        /* } */
+        /* for (int i = 100; i < 2000; i += 100) { */
+        /*     time_neon_dgemm_tiled(i, 2); */
+        /* } */
         for (int i = 100; i < 2000; i += 100) {
-            time_neon_dgemm_tiled(i, 1);
+            time_neon_dgemm_tiled_multi(i, 1);
         }
         for (int i = 100; i < 2000; i += 100) {
-            time_neon_dgemm_tiled(i, 2);
+            time_neon_dgemm_tiled_multi(i, 2);
         }
+        /* for (int i = 100; i < 2000; i += 100) { */
+        /*     time_neon_dgemm_tiled_task(i, 1); */
+        /* } */
+        /* for (int i = 100; i < 2000; i += 100) { */
+        /*     time_neon_dgemm_tiled_task(i, 2); */
+        /* } */
         for (int i = 100; i < 2000; i += 100) {
             time_neon_dgemm_tiled_mkl(i, 1);
         }
         for (int i = 100; i < 2000; i += 100) {
             time_neon_dgemm_tiled_mkl(i, 2);
         }
-
+        for (int i = 100; i < 2000; i += 100) {
+            time_neon_dgemm_tiled_task_mkl(i, 1);
+        }
+        for (int i = 100; i < 2000; i += 100) {
+            time_neon_dgemm_tiled_task_mkl(i, 2);
+        }
     }
     return 0;
 }
