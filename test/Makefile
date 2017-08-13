@@ -1,5 +1,7 @@
 CC=gcc
-CFLAGS=-Wall -Wextra -Werror -std=c11 -O3 -fPIE -march=native -mtune=native -pipe
+
+MKLROOT=/opt/intel/mkl
+CFLAGS=-Wall -Wextra -Werror -std=c11 -O3 -fPIE -march=native -mtune=native -pipe -I${MKLROOT}/include
 LIBS=-lm -L.. -lcblas -L${MKLROOT}/lib/intel64 -lmkl_core -lmkl_gnu_thread -lmkl_intel_lp64
 LDFLAGS=-O3 -Wl,-rpath,'$$ORIGIN/..:${MKLROOT}/lib/intel64' -fopenmp
 TIME_SRC= 	time_gemm.c \

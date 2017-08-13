@@ -3,6 +3,7 @@ CBLAS_VERSION_MINOR=0
 CBLAS_VERSION_PATCH=1
 CBLAS_VERSION=$(CBLAS_VERSION_MAJOR).$(CBLAS_VERSION_MINOR).$(CBLAS_VERSION_PATCH)
 
+MKLROOT=/opt/intel/mkl
 CC=gcc
 LN=ln -f
 CFLAGS=-Wall -Wextra -pedantic -Werror -std=c11 -O3 -fPIC -march=native -mtune=native -pipe -fopenmp
@@ -10,7 +11,8 @@ LIBS=-lm -L.. -L${MKLROOT}/lib/intel64 -lmkl_core -lmkl_gnu_thread -lmkl_intel_l
 LDFLAGS=-shared -O3 -Wl,-soname,"libcblas.so.$(CBLAS_VERSION_MAJOR)" -Wl,-no-undefined \
 	-fopenmp  -Wl,-rpath,'$$ORIGIN/..:${MKLROOT}/lib/intel64'
 SRC= 	zgemm.c \
-	dgemm.c
+	dgemm.c \
+	dgemm_transA.c
 
 OBJ2=$(SRC:.c=.o)
 OBJ=$(OBJ2:.s=.o)

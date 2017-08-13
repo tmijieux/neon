@@ -8,61 +8,21 @@
 #include "util.h"
 #include "timer.h"
 
-extern void neon_cblas_dgemm_transA_reference( CBLAS_LAYOUT layout, CBLAS_TRANSPOSE TransA,
-                                               CBLAS_TRANSPOSE TransB, const int M, const int N,
-                                               const int K, const double alpha, const double *A,
-                                               const int lda, const double *B, const int ldb,
-                                               const double beta, double *C, const int ldc);
+void neon_cblas_dgemm_transA_reference(
+    const CBLAS_LAYOUT layout,
+    const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
+    const int M, const int N, const int K,
+    const double alpha, const double * restrict const A, const int lda,
+    /**/                const double * restrict const B, const int ldb,
+    const double beta,        double * restrict const C, const int ldc   );
 
-extern void neon_cblas_dgemm_transA_avx2_multirow( CBLAS_LAYOUT layout, CBLAS_TRANSPOSE TransA,
-                                                   CBLAS_TRANSPOSE TransB, const int M, const int N,
-                                                   const int K, const double alpha, const double *A,
-                                                   const int lda, const double *B, const int ldb,
-                                                   const double beta, double *C, const int ldc);
-
-extern void neon_cblas_dgemm_transA_avx2_unirow( CBLAS_LAYOUT layout, CBLAS_TRANSPOSE TransA,
-                                                 CBLAS_TRANSPOSE TransB, const int M, const int N,
-                                                 const int K, const double alpha, const double *A,
-                                                 const int lda, const double *B, const int ldb,
-                                                 const double beta, double *C, const int ldc);
-
-extern void neon_cblas_dgemm_transA_avx2_unirow_1( CBLAS_LAYOUT layout, CBLAS_TRANSPOSE TransA,
-                                                   CBLAS_TRANSPOSE TransB, const int M, const int N,
-                                                   const int K, const double alpha, const double *A,
-                                                   const int lda, const double *B, const int ldb,
-                                                   const double beta, double *C, const int ldc);
-
-
-void neon_cblas_dgemm_transA_tiled( CBLAS_LAYOUT layout, CBLAS_TRANSPOSE TransA,
-                                    CBLAS_TRANSPOSE TransB, const int M, const int N,
-                                    const int K, const double alpha, const double *A,
-                                    const int lda, const double *B, const int ldb,
-                                    const double beta, double *C, const int ldc    );
-
-void neon_cblas_dgemm_transA_tiled_multi( CBLAS_LAYOUT layout, CBLAS_TRANSPOSE TransA,
-                                          CBLAS_TRANSPOSE TransB, const int M, const int N,
-                                          const int K, const double alpha, const double *A,
-                                          const int lda, const double *B, const int ldb,
-                                          const double beta, double *C, const int ldc    );
-
-void neon_cblas_dgemm_transA_tiled_plus_mkl( CBLAS_LAYOUT layout, CBLAS_TRANSPOSE TransA,
-                                             CBLAS_TRANSPOSE TransB, const int M, const int N,
-                                             const int K, const double alpha, const double *A,
-                                             const int lda, const double *B, const int ldb,
-                                             const double beta, double *C, const int ldc    );
-
-void neon_cblas_dgemm_transA_tiled_task( CBLAS_LAYOUT layout, CBLAS_TRANSPOSE TransA,
-                                         CBLAS_TRANSPOSE TransB, const int M, const int N,
-                                         const int K, const double alpha, const double *A,
-                                         const int lda, const double *B, const int ldb,
-                                         const double beta, double *C, const int ldc    );
-
-void neon_cblas_dgemm_transA_tiled_task_mkl( CBLAS_LAYOUT layout, CBLAS_TRANSPOSE TransA,
-                                             CBLAS_TRANSPOSE TransB, const int M, const int N,
-                                             const int K, const double alpha, const double *A,
-                                             const int lda, const double *B, const int ldb,
-                                             const double beta, double *C, const int ldc    );
-
+void neon_cblas_dgemm_transA_avx2(
+    const CBLAS_LAYOUT layout,
+    const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
+    const int M, const int N, const int K,
+    const double alpha, const double * restrict const A, const int lda,
+    /**/                const double * restrict const B, const int ldb,
+    const double beta,        double * restrict const C, const int ldc   );
 
 #define GEMM_ADD(M_, N_, K_) ((double)(M_) * (double)(N_) * (double)(K_))
 #define GEMM_MUL(M_, N_, K_) ((double)(M_) * (double)(N_) * (double)(K_))
@@ -84,11 +44,11 @@ void test_neon_dgemm(const int M, const int N, const int K)
     timer_init(&timer);
 
     timer_start(&timer);
-    neon_cblas_dgemm_transA_tiled_task( CblasColMajor, CblasTrans, CblasNoTrans,
-                                        M, N, K,
-                                        alpha, A, K,
-                                        /**/   B, K,
-                                        beta,  C1, M    );
+    neon_cblas_dgemm_transA_avx2( CblasColMajor, CblasTrans, CblasNoTrans,
+                                  M, N, K,
+                                  alpha, A, K,
+                                  /**/   B, K,
+                                  beta,  C1, M    );
     /* cblas_dgemm( CblasColMajor, CblasTrans, CblasNoTrans, */
     /*              M, N, K, */
     /*              alpha, A, K, */

@@ -43,18 +43,23 @@ echo ${HOME}/neon/test
 * results
 ** run experience
    #+begin_src shell
+   ./time_gemm > kernel_perf.csv
+   #+end_src
+
+   #+begin_src shell
    OMP_NUM_THREADS=1 ./time_gemm > kernel_perf.csv
    #+end_src
 
 ** plot
-   #+begin_src R
+   #+begin_src R :session *R*
 library(ggplot2)
 df <- read.csv("kernel_perf.csv")
+df$kernel_ts = paste(df$kernel, "_", df$num_thread, "_", df$TS)
 #df <- df[ df$kernel != "mkl_dgemm", ]
-ggplot(df, aes(x=N, y=gflops_s, color=kernel)) +
+ggplot(df, aes(x=N, y=gflops_s, color=kernel_ts)) +
     geom_point() + geom_smooth(se=F) +
     ggtitle("GEMM Kernel performance")
    #+end_src
 
    #+results:
-   [[file:/tmp/babel-1366HSw/figure1366RDP.png]]
+   [[file:/tmp/figure1736XLZ.png]]
