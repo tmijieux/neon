@@ -3,3 +3,6 @@
 lib*.so
 lib*.so.*
 *.a
+GPATH
+GTAGS
+GRTAGS

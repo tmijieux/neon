@@ -16,6 +16,36 @@
 
 /********** NEON sequential tile ************************/
 
+
+void time_neon_dgemm_reference(const int N)
+{
+    double *A = dalloc_matrix(N, N, N);
+    double *B = dalloc_matrix(N, N, N);
+    double *C = dalloc_matrix(N, N, N);
+    double alpha = 1.0;
+    double beta = 0.0;
+    // fprintf(stderr, "Allocation done.\n");
+
+    struct timer timer;
+    timer_init(&timer);
+
+    timer_start(&timer);
+    neon_cblas_dgemm_transA_reference( CblasColMajor, CblasTrans, CblasNoTrans,
+                                       N, N, N,
+                                       alpha, A, N,
+                                       /**/   B, N,
+                                       beta,  C, N    );
+    timer_stop(&timer);
+
+    // fprintf(stderr, "dgemm done.\n");
+    free(A); free(B); free(C);
+
+    double length = timer_get_length(&timer);
+    double gemm_flops = GEMM_ADD(N, N, N) + GEMM_MUL(N, N, N);
+    double gflops_s = gemm_flops / (length*1000000000.0);
+    printf("%d,-1,1,%g,%g,%g,neon_dgemm_reference\n", N, length, gemm_flops, gflops_s);
+}
+
 void time_neon_dgemm_avx2(const int N)
 {
     double *A = dalloc_matrix(N, N, N);
@@ -42,7 +72,7 @@ void time_neon_dgemm_avx2(const int N)
     double length = timer_get_length(&timer);
     double gemm_flops = GEMM_ADD(N, N, N) + GEMM_MUL(N, N, N);
     double gflops_s = gemm_flops / (length*1000000000.0);
-    printf("%d,-1,1,%g,%g,%g,neon_dgemm_multi\n", N, length, gemm_flops, gflops_s);
+    printf("%d,-1,1,%g,%g,%g,neon_dgemm_avx2\n", N, length, gemm_flops, gflops_s);
 }
 
 /********** NEON tiling + parallel implementation ************************/
@@ -228,6 +258,14 @@ int main(int argc, char *argv[])
 
     printf("N,TS,num_thread,time,flops,gflops_s,kernel\n");
     for (int k = 0; k < 3; ++k) {
+
+        for (int i = 100; i < 2000; i += 100) {
+            time_neon_dgemm_reference(i);
+        }
+        for (int i = 100; i < 2000; i += 100) {
+            time_neon_dgemm_avx2(i);
+        }
+
         /********** NEON tiling + parallel implementation ***********/
 
         for (int i = 100; i < 2000; i += 100) {
@@ -245,12 +283,12 @@ int main(int argc, char *argv[])
         /* } */
 
         /********** PURE MKL ************************/
-        /* for (int i = 100; i < 2000; i += 100) { */
-        /*     time_mkl_dgemm(i, 1); */
-        /* } */
-        /* for (int i = 100; i < 2000; i += 100) { */
-        /*     time_mkl_dgemm(i, 2); */
-        /* } */
+        for (int i = 100; i < 2000; i += 100) {
+            time_mkl_dgemm(i, 1);
+        }
+        for (int i = 100; i < 2000; i += 100) {
+            time_mkl_dgemm(i, 2);
+        }
 
         /********** NEON tiling + MKL ************************/
         /* for (int i = 100; i < 2000; i += 100) { */

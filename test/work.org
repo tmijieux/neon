@@ -61,5 +61,7 @@ ggplot(df, aes(x=N, y=gflops_s, color=kernel_ts)) +
     ggtitle("GEMM Kernel performance")
    #+end_src
 
-   #+results:
-   [[file:/tmp/figure1736XLZ.png]]
+   #+RESULTS:
+   [[file:/tmp/babel-1876e4C/figure1876QSp.png]]
+
+
