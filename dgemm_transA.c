@@ -525,283 +525,283 @@ void neon_cblas_dgemm_transA_tiled_task(
 
 /************* neon tiling + MKL ***********/
 
-void neon_cblas_dgemm_transA_tiled_plus_mkl(
-    const CBLAS_LAYOUT layout,
-    const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
-    const int M, const int N, const int K,
-    const double alpha, const double * restrict const A, const int lda,
-    /**/                const double * restrict const B, const int ldb,
-    const double beta,        double * restrict const C, const int ldc   )
-{
-    assert( layout == CblasColMajor );
-    assert( TransA == CblasTrans );
-    assert( TransB == CblasNoTrans );
-    assert( alpha != 0.0 );
-    assert( isnormal(alpha) );
-
-    mkl_set_num_threads(1);
-
-    const int TS = neon_get_tile_size();
-
-    const int Mm = M / TS;
-    const int mM = M % TS;
-    //const int MM = M - mM;
-
-    const int Nn = N / TS;
-    const int nN = N % TS;
-    //const int NN = N - nN;
-
-    const int Kk = K / TS;
-    const int kK = K % TS;
-    //const int KK = K - kK;
-
-    #pragma omp parallel
-    {
-        #pragma omp for collapse(2) schedule(static)
-        for (int j = 0; j < Nn; ++j) {
-            for (int i = 0; i < Mm; ++i) {
-                for (int k = 0; k < Kk; ++k) {
-                    const double beta_l = (k == 0) ? beta : 1.0;
-                    cblas_dgemm(
-                        /**/           layout,
-                        /**/           TransA, TransB,
-                        /**/           TS, TS, TS,
-                        /**/           alpha,  A+TS*(lda*i+k), lda,
-                        /**/                   B+TS*(ldb*j+k), ldb,
-                        /**/           beta_l, C+TS*(ldc*j+i), ldc       );
-                }
-
-                const double beta_l = (Kk == 0) ? beta : 1.0;
-                cblas_dgemm(
-                    /**/           layout,
-                    /**/           TransA, TransB,
-                    /**/           TS, TS, kK,
-                    /**/           alpha,  A+TS*(lda*i+Kk), lda,
-                    /**/                   B+TS*(ldb*j+Kk), ldb,
-                    /**/           beta_l, C+TS*(ldc*j+i), ldc       );
-            }
-        }
-
-        // last block column
-        #pragma omp for schedule(static)
-        for (int i = 0; i < Mm; ++i) {
-            for (int k = 0; k < Kk; ++k) {
-                const double beta_l = (k == 0) ? beta : 1.0;
-                cblas_dgemm(
-                    /**/           layout,
-                    /**/           TransA, TransB,
-                    /**/           TS, nN, TS,
-                    /**/           alpha,  A+TS*(lda*i+k), lda,
-                    /**/                   B+TS*(ldb*Nn+k), ldb,
-                    /**/           beta_l, C+TS*(ldc*Nn+i), ldc       );
-            }
-            const double beta_l = (Kk == 0) ? beta : 1.0;
-            cblas_dgemm(
-                /**/           layout,
-                /**/           TransA, TransB,
-                /**/           TS, nN, kK,
-                /**/           alpha,  A+TS*(lda*i+Kk), lda,
-                /**/                   B+TS*(ldb*Nn+Kk), ldb,
-                /**/           beta_l, C+TS*(ldc*Nn+i), ldc       );
-        }
-
-        // last block row
-        #pragma omp for schedule(static)
-        for (int j = 0; j < Nn; ++j) {
-            for (int k = 0; k < Kk; ++k) {
-                const double beta_l = (k == 0) ? beta : 1.0;
-                cblas_dgemm(
-                    /**/           layout,
-                    /**/           TransA, TransB,
-                    /**/           mM, TS, TS,
-                    /**/           alpha,  A+TS*(lda*Mm+k), lda,
-                    /**/                   B+TS*(ldb*j+k), ldb,
-                    /**/           beta_l, C+TS*(ldc*j+Mm), ldc       );
-            }
-            const double beta_l = (Kk == 0) ? beta : 1.0;
-            cblas_dgemm(
-                /**/           layout,
-                /**/           TransA, TransB,
-                /**/           mM, TS, kK,
-                /**/           alpha,  A+TS*(lda*Mm+Kk), lda,
-                /**/                   B+TS*(ldb*j+Kk), ldb,
-                /**/           beta_l, C+TS*(ldc*j+Mm), ldc       );
-        }
-
-        // last block right bottom corner
-
-        #pragma omp single
-        {
-            for (int k = 0; k < Kk; ++k) {
-                const double beta_l = (k == 0) ? beta : 1.0;
-                cblas_dgemm(
-                    /**/           layout,
-                    /**/           TransA, TransB,
-                    /**/           mM, nN, TS,
-                    /**/           alpha,  A+TS*(lda*Mm+k), lda,
-                    /**/                   B+TS*(ldb*Nn+k), ldb,
-                    /**/           beta_l, C+TS*(ldc*Nn+Mm), ldc       );
-            }
-            const double beta_l = (Kk == 0) ? beta : 1.0;
-            cblas_dgemm(
-                /**/           layout,
-                /**/           TransA, TransB,
-                /**/           mM, nN, kK,
-                /**/           alpha,  A+TS*(lda*Mm+Kk), lda,
-                /**/                   B+TS*(ldb*Nn+Kk), ldb,
-                /**/           beta_l, C+TS*(ldc*Nn+Mm), ldc       );
-
-        }
-    }
-    mkl_set_num_threads(2);
-}
-
-void neon_cblas_dgemm_transA_tiled_task_mkl(
-    const CBLAS_LAYOUT layout,
-    const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
-    const int M, const int N, const int K,
-    const double alpha, const double * restrict const A, const int lda,
-    /**/                const double * restrict const B, const int ldb,
-    const double beta,        double * restrict const C, const int ldc   )
-{
-    assert( layout == CblasColMajor );
-    assert( TransA == CblasTrans );
-    assert( TransB == CblasNoTrans );
-    assert( alpha != 0.0 );
-    assert( isnormal(alpha) );
-
-    mkl_set_num_threads(1);
-
-    const int TS = neon_get_tile_size();
-    const int Mm = M / TS;
-    const int mM = M % TS;
-    const int Nn = N / TS;
-    const int nN = N % TS;
-    const int Kk = K / TS;
-    const int kK = K % TS;
-
-    #pragma omp parallel
-    {
-        #pragma omp single
-        {
-            for (int j = 0; j < Nn; ++j) {
-                for (int i = 0; i < Mm; ++i) {
-                    for (int k = 0; k < Kk; ++k) {
-                        #pragma omp task depend (inout: C[i+j*ldc])
-                        {
-                            const double beta_l = (k == 0) ? beta : 1.0;
-                            cblas_dgemm(
-                                /**/           layout,
-                                /**/           TransA, TransB,
-                                /**/           TS, TS, TS,
-                                /**/           alpha,  A+TS*(lda*i+k), lda,
-                                /**/                   B+TS*(ldb*j+k), ldb,
-                                /**/           beta_l, C+TS*(ldc*j+i), ldc       );
-                        }
-                    }
-
-                    #pragma omp task depend(inout:C[i+j*ldc])
-                    {
-                        const double beta_l = (Kk == 0) ? beta : 1.0;
-                        cblas_dgemm(
-                            /**/           layout,
-                            /**/           TransA, TransB,
-                            /**/           TS, TS, kK,
-                            /**/           alpha,  A+TS*(lda*i+Kk), lda,
-                            /**/                   B+TS*(ldb*j+Kk), ldb,
-                            /**/           beta_l, C+TS*(ldc*j+i), ldc       );
-                    }
-                }
-            }
-
-            // last block column
-            for (int i = 0; i < Mm; ++i) {
-                for (int k = 0; k < Kk; ++k) {
-                    #pragma omp task depend(inout:C[i+Nn*ldc])
-                    {
-                        const double beta_l = (k == 0) ? beta : 1.0;
-                        cblas_dgemm(
-                            /**/           layout,
-                            /**/           TransA, TransB,
-                            /**/           TS, nN, TS,
-                            /**/           alpha,  A+TS*(lda*i+k), lda,
-                            /**/                   B+TS*(ldb*Nn+k), ldb,
-                            /**/           beta_l, C+TS*(ldc*Nn+i), ldc       );
-                    }
-                }
-                #pragma omp task depend(inout:C[i+Nn*ldc])
-                {
-
-                    const double beta_l = (Kk == 0) ? beta : 1.0;
-                    cblas_dgemm(
-                        /**/           layout,
-                        /**/           TransA, TransB,
-                        /**/           TS, nN, kK,
-                        /**/           alpha,  A+TS*(lda*i+Kk), lda,
-                        /**/                   B+TS*(ldb*Nn+Kk), ldb,
-                        /**/           beta_l, C+TS*(ldc*Nn+i), ldc       );
-                }
-            }
-
-            // last block row
-            for (int j = 0; j < Nn; ++j) {
-                for (int k = 0; k < Kk; ++k) {
-                    #pragma omp task depend(inout:C[Mm+j*ldc])
-                    {
-
-                        const double beta_l = (k == 0) ? beta : 1.0;
-                        cblas_dgemm(
-                            /**/           layout,
-                            /**/           TransA, TransB,
-                            /**/           mM, TS, TS,
-                            /**/           alpha,  A+TS*(lda*Mm+k), lda,
-                            /**/                   B+TS*(ldb*j+k), ldb,
-                            /**/           beta_l, C+TS*(ldc*j+Mm), ldc       );
-                    }
-                }
-
-                #pragma omp task depend(inout:C[Mm+j*ldc])
-                {
-
-                    const double beta_l = (Kk == 0) ? beta : 1.0;
-                    cblas_dgemm(
-                        /**/           layout,
-                        /**/           TransA, TransB,
-                        /**/           mM, TS, kK,
-                        /**/           alpha,  A+TS*(lda*Mm+Kk), lda,
-                        /**/                   B+TS*(ldb*j+Kk), ldb,
-                        /**/           beta_l, C+TS*(ldc*j+Mm), ldc       );
-                }
-            }
-
-            // last block right bottom corner
-            for (int k = 0; k < Kk; ++k) {
-                #pragma omp task depend(inout:C[Mm+Nn*ldc])
-                {
-                    const double beta_l = (k == 0) ? beta : 1.0;
-                    cblas_dgemm(
-                        /**/           layout,
-                        /**/           TransA, TransB,
-                        /**/           mM, nN, TS,
-                        /**/           alpha,  A+TS*(lda*Mm+k), lda,
-                        /**/                   B+TS*(ldb*Nn+k), ldb,
-                        /**/           beta_l, C+TS*(ldc*Nn+Mm), ldc       );
-                }
-            }
-            #pragma omp task depend(inout:C[Mm+Nn*ldc])
-            {
-                const double beta_l = (Kk == 0) ? beta : 1.0;
-                cblas_dgemm(
-                    /**/           layout,
-                    /**/           TransA, TransB,
-                    /**/           mM, nN, kK,
-                    /**/           alpha,  A+TS*(lda*Mm+Kk), lda,
-                    /**/                   B+TS*(ldb*Nn+Kk), ldb,
-                    /**/           beta_l, C+TS*(ldc*Nn+Mm), ldc       );
-            }
-
-        }
-    } // end pragma omp parallel
-
-    mkl_set_num_threads(2);
-}
+//  void neon_cblas_dgemm_transA_tiled_plus_mkl(
+//      const CBLAS_LAYOUT layout,
+//      const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
+//      const int M, const int N, const int K,
+//      const double alpha, const double * restrict const A, const int lda,
+//      /**/                const double * restrict const B, const int ldb,
+//      const double beta,        double * restrict const C, const int ldc   )
+//  {
+//      assert( layout == CblasColMajor );
+//      assert( TransA == CblasTrans );
+//      assert( TransB == CblasNoTrans );
+//      assert( alpha != 0.0 );
+//      assert( isnormal(alpha) );
+//  
+//      mkl_set_num_threads(1);
+//  
+//      const int TS = neon_get_tile_size();
+//  
+//      const int Mm = M / TS;
+//      const int mM = M % TS;
+//      //const int MM = M - mM;
+//  
+//      const int Nn = N / TS;
+//      const int nN = N % TS;
+//      //const int NN = N - nN;
+//  
+//      const int Kk = K / TS;
+//      const int kK = K % TS;
+//      //const int KK = K - kK;
+//  
+//      #pragma omp parallel
+//      {
+//          #pragma omp for collapse(2) schedule(static)
+//          for (int j = 0; j < Nn; ++j) {
+//              for (int i = 0; i < Mm; ++i) {
+//                  for (int k = 0; k < Kk; ++k) {
+//                      const double beta_l = (k == 0) ? beta : 1.0;
+//                      cblas_dgemm(
+//                          /**/           layout,
+//                          /**/           TransA, TransB,
+//                          /**/           TS, TS, TS,
+//                          /**/           alpha,  A+TS*(lda*i+k), lda,
+//                          /**/                   B+TS*(ldb*j+k), ldb,
+//                          /**/           beta_l, C+TS*(ldc*j+i), ldc       );
+//                  }
+//  
+//                  const double beta_l = (Kk == 0) ? beta : 1.0;
+//                  cblas_dgemm(
+//                      /**/           layout,
+//                      /**/           TransA, TransB,
+//                      /**/           TS, TS, kK,
+//                      /**/           alpha,  A+TS*(lda*i+Kk), lda,
+//                      /**/                   B+TS*(ldb*j+Kk), ldb,
+//                      /**/           beta_l, C+TS*(ldc*j+i), ldc       );
+//              }
+//          }
+//  
+//          // last block column
+//          #pragma omp for schedule(static)
+//          for (int i = 0; i < Mm; ++i) {
+//              for (int k = 0; k < Kk; ++k) {
+//                  const double beta_l = (k == 0) ? beta : 1.0;
+//                  cblas_dgemm(
+//                      /**/           layout,
+//                      /**/           TransA, TransB,
+//                      /**/           TS, nN, TS,
+//                      /**/           alpha,  A+TS*(lda*i+k), lda,
+//                      /**/                   B+TS*(ldb*Nn+k), ldb,
+//                      /**/           beta_l, C+TS*(ldc*Nn+i), ldc       );
+//              }
+//              const double beta_l = (Kk == 0) ? beta : 1.0;
+//              cblas_dgemm(
+//                  /**/           layout,
+//                  /**/           TransA, TransB,
+//                  /**/           TS, nN, kK,
+//                  /**/           alpha,  A+TS*(lda*i+Kk), lda,
+//                  /**/                   B+TS*(ldb*Nn+Kk), ldb,
+//                  /**/           beta_l, C+TS*(ldc*Nn+i), ldc       );
+//          }
+//  
+//          // last block row
+//          #pragma omp for schedule(static)
+//          for (int j = 0; j < Nn; ++j) {
+//              for (int k = 0; k < Kk; ++k) {
+//                  const double beta_l = (k == 0) ? beta : 1.0;
+//                  cblas_dgemm(
+//                      /**/           layout,
+//                      /**/           TransA, TransB,
+//                      /**/           mM, TS, TS,
+//                      /**/           alpha,  A+TS*(lda*Mm+k), lda,
+//                      /**/                   B+TS*(ldb*j+k), ldb,
+//                      /**/           beta_l, C+TS*(ldc*j+Mm), ldc       );
+//              }
+//              const double beta_l = (Kk == 0) ? beta : 1.0;
+//              cblas_dgemm(
+//                  /**/           layout,
+//                  /**/           TransA, TransB,
+//                  /**/           mM, TS, kK,
+//                  /**/           alpha,  A+TS*(lda*Mm+Kk), lda,
+//                  /**/                   B+TS*(ldb*j+Kk), ldb,
+//                  /**/           beta_l, C+TS*(ldc*j+Mm), ldc       );
+//          }
+//  
+//          // last block right bottom corner
+//  
+//          #pragma omp single
+//          {
+//              for (int k = 0; k < Kk; ++k) {
+//                  const double beta_l = (k == 0) ? beta : 1.0;
+//                  cblas_dgemm(
+//                      /**/           layout,
+//                      /**/           TransA, TransB,
+//                      /**/           mM, nN, TS,
+//                      /**/           alpha,  A+TS*(lda*Mm+k), lda,
+//                      /**/                   B+TS*(ldb*Nn+k), ldb,
+//                      /**/           beta_l, C+TS*(ldc*Nn+Mm), ldc       );
+//              }
+//              const double beta_l = (Kk == 0) ? beta : 1.0;
+//              cblas_dgemm(
+//                  /**/           layout,
+//                  /**/           TransA, TransB,
+//                  /**/           mM, nN, kK,
+//                  /**/           alpha,  A+TS*(lda*Mm+Kk), lda,
+//                  /**/                   B+TS*(ldb*Nn+Kk), ldb,
+//                  /**/           beta_l, C+TS*(ldc*Nn+Mm), ldc       );
+//  
+//          }
+//      }
+//      mkl_set_num_threads(2);
+//  }
+//  
+//  void neon_cblas_dgemm_transA_tiled_task_mkl(
+//      const CBLAS_LAYOUT layout,
+//      const CBLAS_TRANSPOSE TransA, const CBLAS_TRANSPOSE TransB,
+//      const int M, const int N, const int K,
+//      const double alpha, const double * restrict const A, const int lda,
+//      /**/                const double * restrict const B, const int ldb,
+//      const double beta,        double * restrict const C, const int ldc   )
+//  {
+//      assert( layout == CblasColMajor );
+//      assert( TransA == CblasTrans );
+//      assert( TransB == CblasNoTrans );
+//      assert( alpha != 0.0 );
+//      assert( isnormal(alpha) );
+//  
+//      mkl_set_num_threads(1);
+//  
+//      const int TS = neon_get_tile_size();
+//      const int Mm = M / TS;
+//      const int mM = M % TS;
+//      const int Nn = N / TS;
+//      const int nN = N % TS;
+//      const int Kk = K / TS;
+//      const int kK = K % TS;
+//  
+//      #pragma omp parallel
+//      {
+//          #pragma omp single
+//          {
+//              for (int j = 0; j < Nn; ++j) {
+//                  for (int i = 0; i < Mm; ++i) {
+//                      for (int k = 0; k < Kk; ++k) {
+//                          #pragma omp task depend (inout: C[i+j*ldc])
+//                          {
+//                              const double beta_l = (k == 0) ? beta : 1.0;
+//                              cblas_dgemm(
+//                                  /**/           layout,
+//                                  /**/           TransA, TransB,
+//                                  /**/           TS, TS, TS,
+//                                  /**/           alpha,  A+TS*(lda*i+k), lda,
+//                                  /**/                   B+TS*(ldb*j+k), ldb,
+//                                  /**/           beta_l, C+TS*(ldc*j+i), ldc       );
+//                          }
+//                      }
+//  
+//                      #pragma omp task depend(inout:C[i+j*ldc])
+//                      {
+//                          const double beta_l = (Kk == 0) ? beta : 1.0;
+//                          cblas_dgemm(
+//                              /**/           layout,
+//                              /**/           TransA, TransB,
+//                              /**/           TS, TS, kK,
+//                              /**/           alpha,  A+TS*(lda*i+Kk), lda,
+//                              /**/                   B+TS*(ldb*j+Kk), ldb,
+//                              /**/           beta_l, C+TS*(ldc*j+i), ldc       );
+//                      }
+//                  }
+//              }
+//  
+//              // last block column
+//              for (int i = 0; i < Mm; ++i) {
+//                  for (int k = 0; k < Kk; ++k) {
+//                      #pragma omp task depend(inout:C[i+Nn*ldc])
+//                      {
+//                          const double beta_l = (k == 0) ? beta : 1.0;
+//                          cblas_dgemm(
+//                              /**/           layout,
+//                              /**/           TransA, TransB,
+//                              /**/           TS, nN, TS,
+//                              /**/           alpha,  A+TS*(lda*i+k), lda,
+//                              /**/                   B+TS*(ldb*Nn+k), ldb,
+//                              /**/           beta_l, C+TS*(ldc*Nn+i), ldc       );
+//                      }
+//                  }
+//                  #pragma omp task depend(inout:C[i+Nn*ldc])
+//                  {
+//  
+//                      const double beta_l = (Kk == 0) ? beta : 1.0;
+//                      cblas_dgemm(
+//                          /**/           layout,
+//                          /**/           TransA, TransB,
+//                          /**/           TS, nN, kK,
+//                          /**/           alpha,  A+TS*(lda*i+Kk), lda,
+//                          /**/                   B+TS*(ldb*Nn+Kk), ldb,
+//                          /**/           beta_l, C+TS*(ldc*Nn+i), ldc       );
+//                  }
+//              }
+//  
+//              // last block row
+//              for (int j = 0; j < Nn; ++j) {
+//                  for (int k = 0; k < Kk; ++k) {
+//                      #pragma omp task depend(inout:C[Mm+j*ldc])
+//                      {
+//  
+//                          const double beta_l = (k == 0) ? beta : 1.0;
+//                          cblas_dgemm(
+//                              /**/           layout,
+//                              /**/           TransA, TransB,
+//                              /**/           mM, TS, TS,
+//                              /**/           alpha,  A+TS*(lda*Mm+k), lda,
+//                              /**/                   B+TS*(ldb*j+k), ldb,
+//                              /**/           beta_l, C+TS*(ldc*j+Mm), ldc       );
+//                      }
+//                  }
+//  
+//                  #pragma omp task depend(inout:C[Mm+j*ldc])
+//                  {
+//  
+//                      const double beta_l = (Kk == 0) ? beta : 1.0;
+//                      cblas_dgemm(
+//                          /**/           layout,
+//                          /**/           TransA, TransB,
+//                          /**/           mM, TS, kK,
+//                          /**/           alpha,  A+TS*(lda*Mm+Kk), lda,
+//                          /**/                   B+TS*(ldb*j+Kk), ldb,
+//                          /**/           beta_l, C+TS*(ldc*j+Mm), ldc       );
+//                  }
+//              }
+//  
+//              // last block right bottom corner
+//              for (int k = 0; k < Kk; ++k) {
+//                  #pragma omp task depend(inout:C[Mm+Nn*ldc])
+//                  {
+//                      const double beta_l = (k == 0) ? beta : 1.0;
+//                      cblas_dgemm(
+//                          /**/           layout,
+//                          /**/           TransA, TransB,
+//                          /**/           mM, nN, TS,
+//                          /**/           alpha,  A+TS*(lda*Mm+k), lda,
+//                          /**/                   B+TS*(ldb*Nn+k), ldb,
+//                          /**/           beta_l, C+TS*(ldc*Nn+Mm), ldc       );
+//                  }
+//              }
+//              #pragma omp task depend(inout:C[Mm+Nn*ldc])
+//              {
+//                  const double beta_l = (Kk == 0) ? beta : 1.0;
+//                  cblas_dgemm(
+//                      /**/           layout,
+//                      /**/           TransA, TransB,
+//                      /**/           mM, nN, kK,
+//                      /**/           alpha,  A+TS*(lda*Mm+Kk), lda,
+//                      /**/                   B+TS*(ldb*Nn+Kk), ldb,
+//                      /**/           beta_l, C+TS*(ldc*Nn+Mm), ldc       );
+//              }
+//  
+//          }
+//      } // end pragma omp parallel
+//  
+//      mkl_set_num_threads(2);
+//  }

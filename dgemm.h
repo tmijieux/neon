@@ -2,7 +2,18 @@
 #define NEON_DGEMM_H
 
 
-#include "/opt/intel/mkl/include/mkl.h"
+//#include "/opt/intel/mkl/include/mkl.h"
+enum CBLAS_TRANSPOSE {
+   CblasNoTrans=111,
+   CblasTrans=112,
+   CblasConjTrans=113,
+   AtlasConj=114
+};
+typedef enum CBLAS_TRANSPOSE CBLAS_TRANSPOSE;
+typedef enum CBLAS_LAYOUT {
+    CblasRowMajor=101, 
+    CblasColMajor=102
+} CBLAS_LAYOUT;
 
 void neon_set_tile_size(const int TS);
 int neon_get_tile_size(void);
